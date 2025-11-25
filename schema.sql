@@ -56,7 +56,8 @@ create table State(
     country char(2) not null,
     code char(2) unique not null,
     name text unique not null,
-    primary key(code, name)
+    primary key(code, name),
+    unique(country, code, name)
 );
 insert into State values
     -- U.S. States
@@ -141,6 +142,7 @@ insert into State values
     ('US', 'DC', 'District of Columbia')
 ;
 
+-- Multiple vehicles may share a location (e.g. SeaTac has 1000+), so extract into a table (abbreviated Point of Interest, not called Location since that's a PostGIS thing)
 drop table if exists POI cascade;
 create table POI(
     state char(2) not null references State(code), -- in some cases (especially outside WA), only the state code exists; any other field can be null
@@ -149,22 +151,60 @@ create table POI(
     postalcode int null,
     tract numeric(11) null, -- 2020 Census tract, null if "state" is not in US or is US Armed Forces
     -- In theory, "long"/"lat"/"loc" with 5 decimal places has 1.1m accuracy, but it appears to be heavily bucketed (likely for privacy reasons). In practice, "tract" may have narrower accuracy (https://gis.stackexchange.com/a/8674)
-    -- electricutility text null,
     long real null, -- Longitude for base Postgres
     lat real null, -- Latitude for base Postgres
     loc geometry(point, 4326) null, -- (Longitude Latitude) Point for PostGIS (4326 is Spatial Reference System Identifier for World Geodetic System 1984 aka point type)
 
-    id int primary key generated always as identity, -- As opposed to having to use (state, county, city, postalcode, long, lat) as a primary key, we'll use a synthetic id column
-    unique(state, county, city, postalcode, tract, loc) -- (note, Postgres treats null values as not the same for uniqueness)
+    id int primary key generated always as identity, -- As opposed to having to use (state, county, city, postalcode, loc) as a primary key, we'll use a synthetic id column
+    unique(state, county, city, postalcode, tract, loc) -- Usually, the finest grained bit of data would identify the rest, but since anything but the state can be null, we need a compound pk (note, Postgres treats null values as not the same for uniqueness)
 );
 insert into POI select distinct
     "State", "County", "City", "Postal Code"::int,
     "2020 Census Tract"::numeric(11),
-    -- "Electric Utility",
     substring("Vehicle Location" from '^POINT ?\((.*?) .*?\)$')::real, -- null will propagate through
     substring("Vehicle Location" from '^POINT ?\(.*? (.*?)\)$')::real, -- null will propagate through
     st_pointfromtext("Vehicle Location", 4326) -- null will propagate through
 from csv;
+
+-- In the raw data, each row could have multiple electric utilities listed (or null), so extract and convert to many-to-many relation
+drop table if exists ElectricUtility cascade;
+create table ElectricUtility(
+    name text not null unique,
+    id int primary key generated always as identity
+);
+insert into ElectricUtility select
+    coalesce(utility, 'UNKNOWN') from (
+        select distinct nullif(nullif(utility, 'NO KNOWN ELECTRIC UTILITY SERVICE'), 'UNKNOWN')
+            from csv
+            cross join lateral string_to_table("Electric Utility", '|') as _(utility)
+            where utility <> ''
+            order by nullif(nullif(utility, 'NO KNOWN ELECTRIC UTILITY SERVICE'), 'UNKNOWN') asc nulls first
+    ) _(utility)
+; -- See https://stackoverflow.com/a/29420035
+
+-- The cross reference table ElectricUtility x POI
+drop table if exists RegionalElectricUtility cascade;
+create table RegionalElectricUtility(
+    utility int not null references ElectricUtility(id), 
+    loc int not null references POI(id), 
+    unique(utility, loc)
+);
+-- Note, this query is super slow since it has to do 2 subqueries for for each multi-valued utility row of the original data
+-- Fortunately, we only need to do it once, so I'm not too concerned
+insert into RegionalElectricUtility select distinct
+    (
+        select id from ElectricUtility where name = coalesce(nullif(utility, 'NO KNOWN ELECTRIC UTILITY SERVICE'), 'UNKNOWN')
+    ),
+    (
+        select id from POI where 
+                POI.state = "State"
+                and POI.county is not distinct from "County" 
+                and POI.city is not distinct from "City"
+                and POI.postalcode is not distinct from "Postal Code"::int
+                and POI.tract is not distinct from "2020 Census Tract"::numeric(11)
+                and POI.loc is not distinct from st_pointfromtext("Vehicle Location", 4326)
+    )
+from csv cross join lateral string_to_table("Electric Utility", '|') as _(utility) where utility <> '';
 
 -- Create a table of instanced vehicle variants
 drop table if exists Vehicles cascade;
@@ -190,10 +230,3 @@ insert into Vehicles select
             and POI.loc is not distinct from st_pointfromtext("Vehicle Location", 4326)
     )
 from csv;
-
-
-
-
-
-
-
