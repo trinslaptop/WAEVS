@@ -3,7 +3,7 @@
 
 also **interesting or complex queries**?
 
-## `find_nearby.sql`
+## `find_nearby.sql` and `cityboundaries.sql`
 **performance tuning** and/or **performance comparison**
 **evaluation of technology**
 
