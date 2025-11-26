@@ -183,6 +183,7 @@ insert into ElectricUtility select
 ; -- See https://stackoverflow.com/a/29420035
 
 -- The cross reference table ElectricUtility x POI
+-- The utility company(s) at a point
 drop table if exists RegionalElectricUtility cascade;
 create table RegionalElectricUtility(
     utility int not null references ElectricUtility(id), 
@@ -207,14 +208,14 @@ insert into RegionalElectricUtility select distinct
 from csv cross join lateral string_to_table("Electric Utility", '|') as _(utility) where utility <> '';
 
 -- Create a table of instanced vehicle variants
-drop table if exists Vehicles cascade;
-create table Vehicles(
+drop table if exists EVs cascade;
+create table EVs(
     id int primary key, -- The DOL vehicle ID
     vin char(10), -- First 10 characters of VIN,
     model int not null references EVModel(id),
     loc int not null references POI(id) 
 );
-insert into Vehicles select 
+insert into EVs select 
     "DOL Vehicle ID"::int,
     "VIN (1-10)",
     (
@@ -230,3 +231,19 @@ insert into Vehicles select
             and POI.loc is not distinct from st_pointfromtext("Vehicle Location", 4326)
     )
 from csv;
+
+-- While it's good to have the data decomposed, it's useful to have stuff like make, model, location readily accessible,
+-- so create a view that mimics original dataset (Note that it's not quite the same especially because of multi-valued "Electric Utility" field in original)
+drop view if exists waevs;
+create view waevs as select 
+    EVModel.make,
+    EVModel.model,
+    EVModel.year,
+    EVModel.range,
+    POI.state,
+    POI.county,
+    POI.city,
+    POI.loc,
+    POI.lat,
+    POI.long
+from EVs join EVModel on EVs.model = EVModel.id join POI on EVs.loc = POI.id;
