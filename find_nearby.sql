@@ -8,9 +8,6 @@
 \set radius  2000
 
 \set QUIET
-drop function if exists haversine_distance;
-drop index if exists poi_location_idx;
-drop index if exists evs_loc_idx;
 
 -- With plain SQL/Postgres, we'll have to use a bit of math (the haversine distance formula) to find
 -- distance since long/lat are in decimal degrees while radius is in meters. Additionally, we need to loop
@@ -105,3 +102,8 @@ order by distance asc, make, model, year asc;
 -- 5ms (for me)! that's 90% faster than the naive PostGIS method and 80% faster than the plain SQL version!
 -- Plus we didn't have to do any math!
 -- percent speedup = (old - new)/old * 100
+
+
+drop function if exists haversine_distance;
+drop index if exists poi_location_idx;
+drop index if exists evs_loc_idx;
