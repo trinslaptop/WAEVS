@@ -96,12 +96,12 @@ select
     year,
     long || ' ' || lat as location
 from waevs
-where make = 'VOLVO' and st_within(loc , st_buffer(st_setsrid(st_makepoint(:long, :lat), 4326), :radius/111320.0))
+where make = 'VOLVO' and st_within(loc , st_buffer(st_setsrid(st_makepoint(:long, :lat), 4326), :radius/(111320.0*cos(radians(:lat))))) -- buffer expects degrees, approximate it
 order by distance asc, make, model, year asc;
 \timing off
 \echo '================='
 \echo
 
--- 5ms! that's 1000% faster than the naive PostGIS method and 80% faster than the plain SQL version!
+-- 5ms (for me)! that's 90% faster than the naive PostGIS method and 80% faster than the plain SQL version!
 -- Plus we didn't have to do any math!
--- speedup = new/old
+-- percent speedup = (old - new)/old * 100
